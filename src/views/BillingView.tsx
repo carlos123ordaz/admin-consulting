@@ -75,7 +75,7 @@ function EmitirModal({ invoice, onClose, onDone }: {
         <b>Tipo:</b> {LABEL_TIPO[invoice.tipoComprobante]} ·{' '}
         <b>Serie:</b> {invoice.serie}-{String(invoice.numeroDoc).padStart(8, '0')} ·{' '}
         <b>Doc. cliente:</b> {invoice.clienteNumDoc} ·{' '}
-        <b>Total:</b> {invoice.moneda === 2 ? '$ ' : 'S/ '}{money(invoice.amount).replace('$', '').trim()}
+        <b>Total:</b> {money(invoice.amount)}
       </div>
     </Modal>
   );
@@ -296,7 +296,7 @@ export default function BillingView({ search, openModal, onToast }: Props) {
                     )}
                   </td>
                   <td className="cell-strong" style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    <div>{inv.moneda === 2 ? '$ ' : 'S/ '}{money(inv.amount).replace('$', '').trim()}</div>
+                    <div>{money(inv.amount)}</div>
                     {inv.totalIgv > 0 && (
                       <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>IGV: S/ {inv.totalIgv.toFixed(2)}</div>
                     )}

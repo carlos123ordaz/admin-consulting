@@ -7,9 +7,9 @@ import Avatar from '../components/Avatar';
 import TaskLabel from '../components/TaskLabel';
 import PrioTag from '../components/PrioTag';
 import RichTextEditor from '../components/RichTextEditor';
-import { fmtDate, isLate, formatRelativeTime } from '../lib/utils';
+import { fmtDate, isLate, formatRelativeTime, LABEL_OPTIONS } from '../lib/utils';
 import {
-  apiToggleSubtask, apiUpdateTaskCol, apiUpdateTaskPrio,
+  apiToggleSubtask, apiAddSubtask, apiUpdateTaskCol, apiUpdateTaskPrio,
   apiUpdateTask, apiGetTaskComments, apiAddTaskComment,
   apiAddTaskLink, apiDeleteTaskLink, apiAddTaskFile, apiDeleteTaskFile,
 } from '../lib/api';
@@ -45,6 +45,16 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
   // Inline description editing
   const [editingDesc, setEditingDesc] = useState(false);
   const [descVal, setDescVal] = useState(task?.desc || '');
+
+  // Label editor
+  const [labelInput, setLabelInput] = useState('');
+  const [labelMenuOpen, setLabelMenuOpen] = useState(false);
+  const labelRef = useRef<HTMLDivElement>(null);
+
+  // Points inline edit
+  const [editingPoints, setEditingPoints] = useState(false);
+  const [pointsVal, setPointsVal] = useState(task?.points ?? 0);
+  const pointsInputRef = useRef<HTMLInputElement>(null);
 
   // Link state
   const [linkFormOpen, setLinkFormOpen] = useState(false);
@@ -93,6 +103,10 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
   }, [task?.desc]);
 
   useEffect(() => {
+    if (task && !editingPoints) setPointsVal(task.points);
+  }, [task?.points]);
+
+  useEffect(() => {
     if (task) {
       setLocalLinks(task.links || []);
       setLocalFiles(task.files || []);
@@ -108,6 +122,7 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
+      if (labelRef.current && !labelRef.current.contains(e.target as Node)) setLabelMenuOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -116,6 +131,10 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
   useEffect(() => {
     if (editingTitle) titleInputRef.current?.focus();
   }, [editingTitle]);
+
+  useEffect(() => {
+    if (editingPoints) { pointsInputRef.current?.focus(); pointsInputRef.current?.select(); }
+  }, [editingPoints]);
 
   // Load comments from DB
   const { data: dbComments = [] } = useQuery({
@@ -187,6 +206,38 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['db'] }),
   });
 
+  const addSubMut = useMutation({
+    mutationFn: ({ title, position }: { title: string; position: number }) =>
+      apiAddSubtask(taskId, title, position),
+    onSuccess: () => invalidateDB(queryClient),
+  });
+
+  const updateFieldMut = useMutation({
+    mutationFn: (fields: Parameters<typeof apiUpdateTask>[1]) => apiUpdateTask(taskId, fields),
+    onMutate: async (fields) => {
+      await queryClient.cancelQueries({ queryKey: ['db'] });
+      const prev = queryClient.getQueryData<DB>(['db']);
+      if (prev) {
+        queryClient.setQueryData<DB>(['db'], {
+          ...prev,
+          tasks: prev.tasks.map(t => {
+            if (t.id !== taskId) return t;
+            const patch: Partial<typeof t> = {};
+            if (fields.due_date !== undefined) patch.due = fields.due_date ?? '';
+            if (fields.points !== undefined) patch.points = fields.points;
+            if (fields.labels !== undefined) patch.labels = fields.labels;
+            if (fields.assignee_id !== undefined) patch.assignee = fields.assignee_id ?? '';
+            if (fields.project_id !== undefined) patch.project = fields.project_id;
+            return { ...t, ...patch };
+          }),
+        });
+      }
+      return { prev };
+    },
+    onError: (_, __, ctx) => { if (ctx?.prev) queryClient.setQueryData(['db'], ctx.prev); },
+    onSettled: () => invalidateDB(queryClient),
+  });
+
   if (!task) return null;
   const p = db.projectById[task.project];
   const c = p ? db.clientById[p.client] : null;
@@ -214,21 +265,22 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
   const handleAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    onToast(`Subiendo "${file.name}"…`);
     try {
-      const saved = await apiAddTaskFile(taskId, file.name, file.size);
+      const saved = await apiAddTaskFile(taskId, file);
       setLocalFiles(prev => [...prev, saved]);
       invalidateDB(queryClient);
       onToast(`Archivo "${file.name}" adjuntado`);
     } catch {
-      onToast(`Error al adjuntar "${file.name}"`);
+      onToast(`Error al adjuntar "${file.name}". Verifica que el bucket "task-files" exista en Supabase Storage.`);
     }
     e.target.value = '';
   };
 
-  const handleRemoveFile = async (fileId: string, fileName: string) => {
+  const handleRemoveFile = async (fileId: string, fileName: string, url?: string | null) => {
     setLocalFiles(prev => prev.filter(f => f.id !== fileId));
     try {
-      await apiDeleteTaskFile(fileId);
+      await apiDeleteTaskFile(fileId, url);
       invalidateDB(queryClient);
       onToast(`Archivo "${fileName}" eliminado`);
     } catch {
@@ -399,7 +451,7 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
                     <span>{f.name}</span>
                     {f.size > 0 && <span style={{ color: 'var(--muted)', fontSize: 11 }}>{(f.size / 1024).toFixed(0)} KB</span>}
                     <button style={{ marginLeft: 'auto', color: 'var(--muted)' }}
-                      onClick={e => { e.stopPropagation(); handleRemoveFile(f.id, f.name); }}>
+                      onClick={e => { e.stopPropagation(); handleRemoveFile(f.id, f.name, f.url); }}>
                       <Icon name="close" size={12} />
                     </button>
                   </div>
@@ -491,10 +543,14 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
             <div className="subtask-add" style={{ marginTop: 8 }}>
               <input ref={subtaskInputRef} id="subtask-add-input" className="input"
                 placeholder="Añadir subtarea y pulsa Enter" style={{ fontSize: 13 }}
+                disabled={addSubMut.isPending}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                    onToast('Subtarea agregada');
+                  if (e.key === 'Enter') {
+                    const title = e.currentTarget.value.trim();
+                    if (!title) return;
+                    const position = task.subs.length;
                     e.currentTarget.value = '';
+                    addSubMut.mutate({ title, position });
                   }
                 }} />
             </div>
@@ -554,20 +610,20 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
             )}
             {tab === 'historial' && (
               <div>
-                {[
-                  { who: p?.lead || task.assignee, txt: 'creó esta tarea', time: 'hace 4 días' },
-                  { who: task.assignee, txt: 'se asignó la tarea', time: 'hace 4 días' },
-                  { who: task.assignee, txt: `cambió la prioridad a ${task.prio}`, time: 'hace 3 días' },
-                  { who: task.assignee, txt: `movió la tarea a ${col?.title}`, time: 'hace 2 h' },
-                ].filter(it => it.who).map((it, i) => (
-                  <div className="comment" key={i}>
-                    <Avatar id={it.who!} size={28} />
+                {task.createdAt && (
+                  <div className="comment">
+                    <Avatar id={p?.lead || task.assignee} size={28} />
                     <div className="c-body">
-                      <div className="c-text"><b>{db.byId[it.who!]?.name}</b> {it.txt}</div>
-                      <div className="c-time" style={{ marginTop: 2 }}>{it.time}</div>
+                      <div className="c-text">
+                        <b>{db.byId[p?.lead || task.assignee]?.name || 'Sistema'}</b> creó esta tarea
+                      </div>
+                      <div className="c-time" style={{ marginTop: 2 }}>{formatRelativeTime(task.createdAt)}</div>
                     </div>
                   </div>
-                ))}
+                )}
+                <div style={{ padding: '16px 0 8px', color: 'var(--muted)', fontSize: 12.5, fontWeight: 600 }}>
+                  El historial detallado de cambios no está disponible todavía.
+                </div>
               </div>
             )}
             {tab === 'registro' && (
@@ -587,13 +643,20 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
             </select>
 
             <div style={{ marginTop: 16, border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: '4px 14px' }}>
+              {/* Responsable */}
               <div className="detail-row">
                 <div className="dl">Responsable</div>
                 <div className="dv">
-                  {task.assignee && <Avatar id={task.assignee} size={24} />}
-                  {db.byId[task.assignee]?.name}
+                  <select className="select" style={{ height: 32, fontSize: 12.5, width: '100%' }}
+                    value={task.assignee}
+                    onChange={e => updateFieldMut.mutate({ assignee_id: e.target.value || null })}>
+                    <option value="">— Sin asignar —</option>
+                    {db.team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
                 </div>
               </div>
+
+              {/* Prioridad */}
               <div className="detail-row">
                 <div className="dl">Prioridad</div>
                 <div className="dv">
@@ -603,15 +666,22 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
                   </select>
                 </div>
               </div>
-              {p && (
-                <div className="detail-row">
-                  <div className="dl">Proyecto</div>
-                  <div className="dv">
-                    <span style={{ width: 10, height: 10, borderRadius: 3, background: p.color, display: 'inline-block' }}></span>
-                    {p.name}
-                  </div>
+
+              {/* Proyecto */}
+              <div className="detail-row">
+                <div className="dl">Proyecto</div>
+                <div className="dv">
+                  <select className="select" style={{ height: 32, fontSize: 12.5, width: '100%' }}
+                    value={task.project}
+                    onChange={e => updateFieldMut.mutate({ project_id: e.target.value })}>
+                    {db.projects.filter(pr => !pr.closed).map(pr => (
+                      <option key={pr.id} value={pr.id}>{pr.name}</option>
+                    ))}
+                  </select>
                 </div>
-              )}
+              </div>
+
+              {/* Cliente (solo lectura, derivado del proyecto) */}
               {c && (
                 <div className="detail-row">
                   <div className="dl">Cliente</div>
@@ -621,20 +691,127 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
                   </div>
                 </div>
               )}
-              <div className="detail-row">
-                <div className="dl">Etiquetas</div>
-                <div className="dv">{task.labels.map(l => <TaskLabel key={l} text={l} />)}</div>
-              </div>
-              <div className="detail-row">
-                <div className="dl">Vencimiento</div>
-                <div className="dv" style={{ color: isLate(task.due) && task.col !== 'done' ? 'var(--red)' : 'var(--ink)' }}>
-                  <Icon name="calendar" size={15} cls="muted" />{fmtDate(task.due)}
+
+              {/* Etiquetas */}
+              <div className="detail-row" style={{ alignItems: 'flex-start', paddingTop: 10, paddingBottom: 10 }}>
+                <div className="dl" style={{ paddingTop: 2 }}>Etiquetas</div>
+                <div className="dv" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                    {task.labels.map(l => (
+                      <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                        <TaskLabel text={l} />
+                        <button
+                          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginLeft: -2 }}
+                          onClick={() => updateFieldMut.mutate({ labels: task.labels.filter(x => x !== l) })}>
+                          <Icon name="close" size={9} />
+                        </button>
+                      </span>
+                    ))}
+                    {/* Botón + */}
+                    <div className="ctx-wrap" ref={labelRef}>
+                      <button
+                        className="icon-btn"
+                        style={{ width: 22, height: 22, borderRadius: '50%', border: '1.5px dashed var(--line)', color: 'var(--muted)', flexShrink: 0 }}
+                        title="Agregar etiqueta"
+                        onClick={() => { setLabelMenuOpen(o => !o); setLabelInput(''); }}>
+                        <Icon name="plus" size={12} sw={2.5} />
+                      </button>
+                      {labelMenuOpen && (
+                        <div className="ctx-menu" style={{ right: 0, left: 'auto', top: 28, width: 200, padding: 0 }}>
+                          <div style={{ padding: '8px 8px 4px' }}>
+                            <input
+                              className="input"
+                              autoFocus
+                              style={{ height: 28, fontSize: 12, padding: '0 8px', width: '100%' }}
+                              placeholder="Buscar o crear…"
+                              value={labelInput}
+                              onChange={e => setLabelInput(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const val = labelInput.trim();
+                                  if (val && !task.labels.includes(val)) {
+                                    updateFieldMut.mutate({ labels: [...task.labels, val] });
+                                  }
+                                  setLabelInput('');
+                                  setLabelMenuOpen(false);
+                                }
+                                if (e.key === 'Escape') { setLabelMenuOpen(false); setLabelInput(''); }
+                              }}
+                            />
+                          </div>
+                          <div style={{ maxHeight: 180, overflowY: 'auto', borderTop: '1px solid var(--line-2)' }}>
+                            {LABEL_OPTIONS
+                              .filter(opt => opt.toLowerCase().includes(labelInput.toLowerCase()) && !task.labels.includes(opt))
+                              .map(opt => (
+                                <button key={opt} className="ctx-item"
+                                  onMouseDown={e => { e.preventDefault(); updateFieldMut.mutate({ labels: [...task.labels, opt] }); setLabelInput(''); setLabelMenuOpen(false); }}>
+                                  <Icon name="plus" size={12} sw={2.4} />{opt}
+                                </button>
+                              ))}
+                            {labelInput.trim() && !LABEL_OPTIONS.includes(labelInput.trim()) && !task.labels.includes(labelInput.trim()) && (
+                              <button className="ctx-item"
+                                onMouseDown={e => { e.preventDefault(); updateFieldMut.mutate({ labels: [...task.labels, labelInput.trim()] }); setLabelInput(''); setLabelMenuOpen(false); }}>
+                                <Icon name="plus" size={12} sw={2.4} />Crear «{labelInput.trim()}»
+                              </button>
+                            )}
+                            {LABEL_OPTIONS.filter(opt => !opt.toLowerCase().includes(labelInput.toLowerCase()) || task.labels.includes(opt)).length === LABEL_OPTIONS.length && !labelInput.trim() && (
+                              <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--muted)' }}>
+                                Todas las etiquetas están asignadas
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {/* Vencimiento */}
+              <div className="detail-row">
+                <div className="dl">Vencimiento</div>
+                <div className="dv">
+                  <input className="input" type="date" style={{ height: 32, fontSize: 12.5, width: '100%',
+                    color: isLate(task.due) && task.col !== 'done' ? 'var(--red)' : 'var(--ink)' }}
+                    value={task.due || ''}
+                    onChange={e => updateFieldMut.mutate({ due_date: e.target.value || null })} />
+                </div>
+              </div>
+
+              {/* Estimación */}
               <div className="detail-row">
                 <div className="dl">Estimación</div>
-                <div className="dv"><span className="badge badge-gray">{task.points} pts</span></div>
+                <div className="dv">
+                  {editingPoints ? (
+                    <input
+                      ref={pointsInputRef}
+                      className="input"
+                      type="number" min={0}
+                      style={{ height: 28, fontSize: 13, width: 72, textAlign: 'right', padding: '0 8px' }}
+                      value={pointsVal}
+                      onChange={e => setPointsVal(parseInt(e.target.value) || 0)}
+                      onBlur={() => {
+                        setEditingPoints(false);
+                        if (pointsVal !== task.points) updateFieldMut.mutate({ points: pointsVal });
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                        if (e.key === 'Escape') { setEditingPoints(false); setPointsVal(task.points); }
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="badge badge-gray editable-field"
+                      title="Clic para editar"
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => { setPointsVal(task.points); setEditingPoints(true); }}>
+                      {task.points} pts
+                    </span>
+                  )}
+                </div>
               </div>
+
+              {/* Sprint */}
               {task.sprintId && (
                 <div className="detail-row">
                   <div className="dl">Sprint</div>
@@ -645,6 +822,8 @@ export default function TaskDrawer({ taskId, onClose, onToast }: Props) {
                   </div>
                 </div>
               )}
+
+              {/* Informador */}
               {p?.lead && (
                 <div className="detail-row">
                   <div className="dl">Informador</div>

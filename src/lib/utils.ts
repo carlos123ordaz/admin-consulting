@@ -2,18 +2,18 @@ export const TODAY = new Date();
 TODAY.setHours(0, 0, 0, 0);
 
 export function money(n: number): string {
-  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return 'S/ ' + n.toLocaleString('es-PE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 export function fmtDate(iso: string): string {
   const d = new Date(iso + 'T00:00:00');
-  return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('es-PE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function fmtDateShort(iso: string): string {
   if (!iso) return '—';
   const d = new Date(iso + 'T00:00:00');
-  return d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('es-PE', { day: 'numeric', month: 'short' });
 }
 
 export function isLate(iso: string): boolean {

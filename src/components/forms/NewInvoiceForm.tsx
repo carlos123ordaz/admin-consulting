@@ -89,7 +89,7 @@ export default function NewInvoiceForm({ onCreate, onClose, loading }: Props) {
   const [concept, setConcept] = useState('');
   const [clienteTipoDoc, setClienteTipoDoc] = useState<TipoDocIdentidad>(TIPO_DOC_IDENTIDAD.RUC);
   const [clienteNumDoc, setClienteNumDoc] = useState('');
-  const [moneda, setMoneda] = useState<1 | 2>(1);
+  const moneda = 1 as const;
   const [issued, setIssued] = useState(today);
   const [due, setDue] = useState(() => new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
   const [status, setStatus] = useState('Pendiente');
@@ -254,13 +254,6 @@ export default function NewInvoiceForm({ onCreate, onClose, loading }: Props) {
             value={concept} onChange={e => setConcept(e.target.value)} />
         </Field>
 
-        <Field label="Moneda">
-          <select className="select full" value={moneda}
-            onChange={e => setMoneda(Number(e.target.value) as 1 | 2)}>
-            <option value={1}>PEN — Soles</option>
-            <option value={2}>USD — Dólares</option>
-          </select>
-        </Field>
         <Field label="Estado de cobro">
           <select className="select full" value={status} onChange={e => setStatus(e.target.value)}>
             <option value="Pendiente">Pendiente</option>
@@ -372,7 +365,7 @@ export default function NewInvoiceForm({ onCreate, onClose, loading }: Props) {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0 0', fontWeight: 800, fontSize: 15, color: 'var(--ink)' }}>
             <span>Total</span>
-            <span>{moneda === 1 ? 'S/ ' : '$ '}{fmt(totalAmount)}</span>
+            <span>S/ {fmt(totalAmount)}</span>
           </div>
         </div>
       </div>

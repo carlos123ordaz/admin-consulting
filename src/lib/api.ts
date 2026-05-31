@@ -80,6 +80,7 @@ export async function fetchAll(): Promise<DB> {
     sprintId: t.sprint_id || null,
     links: linksByTask[t.id] || [],
     files: filesByTask[t.id] || [],
+    createdAt: t.created_at || '',
   }));
 
   // Task counts per project
@@ -209,6 +210,11 @@ export async function apiCreateTask(t: {
 export async function apiUpdateTask(id: string, fields: {
   title?: string;
   description?: string;
+  due_date?: string | null;
+  points?: number;
+  labels?: string[];
+  assignee_id?: string | null;
+  project_id?: string;
 }): Promise<void> {
   const { error } = await supabase.from('tasks').update(fields).eq('id', id);
   if (error) throw error;
@@ -249,6 +255,11 @@ export async function apiUpdateTaskPrio(id: string, priority: string): Promise<v
 
 export async function apiToggleSubtask(subtaskId: string, done: boolean): Promise<void> {
   const { error } = await supabase.from('subtasks').update({ done }).eq('id', subtaskId);
+  if (error) throw error;
+}
+
+export async function apiAddSubtask(taskId: string, title: string, position: number): Promise<void> {
+  const { error } = await supabase.from('subtasks').insert({ task_id: taskId, title, done: false, position });
   if (error) throw error;
 }
 
@@ -514,13 +525,29 @@ export async function apiDeleteTaskLink(linkId: string): Promise<void> {
 
 // ---- Task File APIs ----
 
-export async function apiAddTaskFile(taskId: string, name: string, size: number): Promise<TaskFile> {
-  const { data, error } = await supabase.from('task_files').insert({ task_id: taskId, name, size }).select().single();
+export async function apiAddTaskFile(taskId: string, file: File): Promise<TaskFile> {
+  // Upload to Supabase Storage
+  const ext = file.name.split('.').pop() || 'bin';
+  const path = `${taskId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const { error: upErr } = await supabase.storage.from('task-files').upload(path, file, { upsert: false });
+  if (upErr) throw upErr;
+
+  const { data: { publicUrl } } = supabase.storage.from('task-files').getPublicUrl(path);
+
+  const { data, error } = await supabase
+    .from('task_files')
+    .insert({ task_id: taskId, name: file.name, size: file.size, url: publicUrl })
+    .select().single();
   if (error) throw error;
   return { id: data.id, taskId: data.task_id, name: data.name, size: data.size || 0, url: data.url || null };
 }
 
-export async function apiDeleteTaskFile(fileId: string): Promise<void> {
+export async function apiDeleteTaskFile(fileId: string, url?: string | null): Promise<void> {
+  // Remove from storage if we have the path
+  if (url) {
+    const match = url.match(/task-files\/(.+)$/);
+    if (match) await supabase.storage.from('task-files').remove([decodeURIComponent(match[1])]);
+  }
   const { error } = await supabase.from('task_files').delete().eq('id', fileId);
   if (error) throw error;
 }

@@ -102,6 +102,7 @@ export interface Task {
   sprintId: string | null;
   links: TaskLink[];
   files: TaskFile[];
+  createdAt: string;
 }
 
 export interface InvoiceItem {
