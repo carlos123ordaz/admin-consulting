@@ -984,6 +984,8 @@ textarea.input { height: auto; padding: 11px 13px; resize: vertical; min-height:
 }
 .issue-desc:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-50); }
 .issue-desc::placeholder { color: var(--muted); }
+.issue-rte { border: 1px solid var(--line); border-radius: var(--r-md); min-height: 120px; transition: border-color .12s, box-shadow .12s; }
+.issue-rte:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-50); }
 .subtask-add { display: flex; gap: 8px; margin-top: 8px; }
 .subtask-add input { flex: 1; }
 .issue-side .dl { font-size: 12px; font-weight: 700; color: var(--ink-3); margin-bottom: 6px; }
@@ -1096,7 +1098,7 @@ textarea.input { height: auto; padding: 11px 13px; resize: vertical; min-height:
    RICH TEXT EDITOR (TipTap)
    ============================================================ */
 .rte-wrap {
-  border: 1px solid var(--line); border-radius: var(--r-md);
+  border: 1px solid var(--line); border-radius: var(--r-md); cursor: text;
   overflow: hidden; background: var(--surface);
 }
 .rte-wrap.editable { box-shadow: 0 0 0 2px transparent; transition: box-shadow .15s; }
@@ -1117,7 +1119,7 @@ textarea.input { height: auto; padding: 11px 13px; resize: vertical; min-height:
 .rte-btn:first-child { font-style: italic; }
 .rte-sep { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
 .rte-content {
-  padding: 12px 14px; min-height: 100px; outline: none;
+  padding: 12px 14px; min-height: 100px; outline: none; cursor: text;
   font-size: 14px; line-height: 1.65; color: var(--ink);
 }
 .rte-content .ProseMirror { outline: none; }

@@ -47,7 +47,10 @@ export default function RichTextEditor({ content, onChange, placeholder, editabl
   );
 
   return (
-    <div className={'rte-wrap' + (editable ? ' editable' : '')}>
+    <div
+      className={'rte-wrap' + (editable ? ' editable' : '')}
+      onClick={() => { if (editable) editor?.commands.focus(); }}
+    >
       {editable && editor && (
         <div className="rte-toolbar">
           {btn('B', editor.isActive('bold'), () => editor.chain().focus().toggleBold().run())}

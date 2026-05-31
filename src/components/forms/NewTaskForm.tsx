@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useDB } from '../../context/DBContext';
 import Icon from '../Icon';
 import Avatar from '../Avatar';
+import RichTextEditor from '../RichTextEditor';
 import { LABEL_OPTIONS } from '../../lib/utils';
 import type { TaskCol, TaskPrio } from '../../types';
 
@@ -88,8 +89,14 @@ export default function NewTaskForm({ onCreate, onClose, preset, loading }: Prop
             </div>
 
             <div className="issue-label">Descripción</div>
-            <textarea className="issue-desc" placeholder="Agrega una descripción más detallada…"
-              value={f.desc} onChange={e => set('desc', e.target.value)} />
+            <div className="issue-rte">
+              <RichTextEditor
+                content={f.desc}
+                onChange={v => set('desc', v)}
+                editable
+                placeholder="Agrega una descripción más detallada…"
+              />
+            </div>
 
             <div className="issue-label">
               Subtareas {subs.length > 0 && <span style={{ color: 'var(--ink-3)', fontWeight: 700 }}>· {subs.length}</span>}
